@@ -1,0 +1,91 @@
+# Fast Dockerfile for Biomni - Minimal R packages
+# Optimized for quick builds, skipping heavy R/Bioconductor packages
+
+FROM continuumio/miniconda3:latest AS base
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    wget \
+    curl \
+    git \
+    vim \
+    gcc \
+    g++ \
+    make \
+    cmake \
+    zlib1g-dev \
+    libbz2-dev \
+    liblzma-dev \
+    libcurl4-openssl-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Stage 2: Python environment setup (FAST - no R)
+FROM base AS python-env
+
+# Copy environment files
+COPY biomni_env/environment.yml /tmp/environment.yml
+
+# Create main conda environment
+RUN conda env create -f /tmp/environment.yml -n biomni_e1 && \
+    conda clean -afy
+
+# Activate environment and install essential bioinformatics packages only
+SHELL ["conda", "run", "-n", "biomni_e1", "/bin/bash", "-c"]
+
+# Install only essential bioinformatics tools (skip heavy ones)
+RUN conda install -y -c conda-forge -c bioconda \
+    samtools \
+    bedtools \
+    && conda clean -afy
+
+# Install core Python bioinformatics packages
+RUN pip install --no-cache-dir \
+    biopython \
+    pandas \
+    numpy \
+    scipy \
+    scikit-learn \
+    scanpy \
+    rdkit
+
+# Stage 3: Production image (NO R packages)
+FROM python-env AS production
+
+WORKDIR /app
+
+# Copy Biomni source code
+COPY biomni/ /app/biomni/
+COPY pyproject.toml /app/
+COPY README.md /app/
+COPY biomni_local_mount.py /app/
+
+# Install Biomni package
+SHELL ["conda", "run", "-n", "biomni_e1", "/bin/bash", "-c"]
+RUN pip install -e .
+
+# Create data directories
+RUN mkdir -p /biomni_data/data_lake \
+    /biomni_data/cache \
+    /biomni_data/results \
+    /biomni_data/logs
+
+# Set environment variables
+ENV BIOMNI_DATA_PATH=/biomni_data
+ENV CONDA_DEFAULT_ENV=biomni_e1
+ENV PATH="/opt/conda/envs/biomni_e1/bin:$PATH"
+
+# Create entrypoint script with proper formatting
+RUN printf '#!/bin/bash\n\
+source /opt/conda/etc/profile.d/conda.sh\n\
+conda activate biomni_e1\n\
+exec "$@"\n' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh && \
+    cat /entrypoint.sh  # Debug: show content
+
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
+CMD ["python", "-c", "from biomni_local_mount import A1LocalMount; print('Biomni container ready')"]

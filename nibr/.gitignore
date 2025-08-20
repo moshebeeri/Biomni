@@ -1,0 +1,22 @@
+# Environment files with secrets
+.env
+.env.bak
+.env.local
+.env.*.local
+
+# Temporary files
+*.tmp
+*.bak
+Dockerfile.tmp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db

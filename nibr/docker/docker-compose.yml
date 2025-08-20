@@ -1,0 +1,244 @@
+version: '3.8'
+
+# Lightweight Docker Compose for Tier 1-2 Deployments
+# Optimized for local Mac development with mounted data lake
+# Resource-constrained for 8-16GB RAM containers
+
+services:
+  # Tier 1: Literature Agent (8GB RAM)
+  biomni-tier1:
+    build:
+      context: ../..
+      dockerfile: nibr/docker/Dockerfile.nibr
+      target: production
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    image: biomni:tier1
+    container_name: biomni-tier1-agent
+    hostname: biomni-tier1
+    environment:
+      # API Keys (from .env file)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      
+      # Biomni Configuration
+      - BIOMNI_DATA_PATH=/biomni_data
+      - BIOMNI_CACHE_PATH=/biomni_data/cache
+      - BIOMNI_LOG_LEVEL=${BIOMNI_LOG_LEVEL:-INFO}
+      - BIOMNI_MAX_WORKERS=2  # Reduced for Tier 1
+      
+      # IMPORTANT: Skip S3 downloads when using local mount
+      - BIOMNI_SKIP_DOWNLOAD=true
+      
+      # Agent type identifier
+      - AGENT_TYPE=literature
+      - AGENT_TIER=1
+      
+    volumes:
+      # Mount local Mac data lake (read-only for safety)
+      - ${BIOMNI_LOCAL_DATA_PATH:-../../data}/data_lake:/biomni_data/data_lake:ro
+      
+      # Mount benchmark data
+      - ${BIOMNI_LOCAL_DATA_PATH:-../../data}/benchmark:/biomni_data/benchmark:ro
+      
+      # Cache volume (read-write)
+      - biomni-cache-tier1:/biomni_data/cache
+      
+      # Results volume (read-write)
+      - ./data/results:/biomni_data/results
+      
+      # Logs volume
+      - ./data/logs:/biomni_data/logs
+      
+      # Mount custom initialization script
+      - ../agents/biomni_wrapper.py:/app/biomni_local_mount.py:ro
+      
+      # Mount notebooks and tutorials
+      - ../../notebooks:/app/notebooks
+      - ./tutorials:/app/tutorials
+      
+    networks:
+      - biomni-tier-network
+    
+    # Tier 1 Resource limits (8GB RAM)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 8G
+        reservations:
+          cpus: '1'
+          memory: 4G
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "from biomni_local_mount import A1LocalMount; A1LocalMount()"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+    
+    restart: unless-stopped
+    
+    # Override entrypoint to use local mount wrapper
+    entrypoint: ["/entrypoint.sh"]
+    command: ["python", "-c", "from biomni_local_mount import A1LocalMount; print('Tier 1 Agent Ready')"]
+
+  # Tier 2: Molecular Biology Agent (16GB RAM)
+  biomni-nibr:
+    build:
+      context: ../..
+      dockerfile: nibr/docker/Dockerfile.nibr
+      target: production
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    image: biomni:tier2
+    container_name: biomni-nibr-agent
+    hostname: biomni-nibr
+    environment:
+      # Same API keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      
+      # Biomni Configuration
+      - BIOMNI_DATA_PATH=/biomni_data
+      - BIOMNI_CACHE_PATH=/biomni_data/cache
+      - BIOMNI_LOG_LEVEL=${BIOMNI_LOG_LEVEL:-INFO}
+      - BIOMNI_MAX_WORKERS=4  # More workers for Tier 2
+      
+      # Skip S3 downloads
+      - BIOMNI_SKIP_DOWNLOAD=true
+      
+      # Agent type identifier
+      - AGENT_TYPE=molecular_biology
+      - AGENT_TIER=2
+      
+    volumes:
+      # Mount local Mac data lake (read-only)
+      - ${BIOMNI_LOCAL_DATA_PATH:-../../data}/data_lake:/biomni_data/data_lake:ro
+      
+      # Mount benchmark data
+      - ${BIOMNI_LOCAL_DATA_PATH:-../../data}/benchmark:/biomni_data/benchmark:ro
+      
+      # Separate cache for Tier 2
+      - biomni-cache-tier2:/biomni_data/cache
+      
+      # Shared results
+      - ./data/results:/biomni_data/results
+      
+      # Logs
+      - ./data/logs:/biomni_data/logs
+      
+      # Mount custom initialization
+      - ../agents/biomni_wrapper.py:/app/biomni_local_mount.py:ro
+      
+      # Mount notebooks and tutorials
+      - ../../notebooks:/app/notebooks
+      - ./tutorials:/app/tutorials
+      
+    networks:
+      - biomni-tier-network
+    
+    # Tier 2 Resource limits (16GB RAM)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 16G
+        reservations:
+          cpus: '2'
+          memory: 8G
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "from biomni_local_mount import A1LocalMount; A1LocalMount()"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 120s
+    
+    restart: unless-stopped
+    
+    profiles:
+      - tier2  # Only start with --profile tier2
+
+  # Development container with Jupyter (Tier 1-2 compatible)
+  biomni-dev-tier:
+    build:
+      context: ../..
+      dockerfile: nibr/docker/Dockerfile.nibr
+      target: development
+    image: biomni:dev-tier
+    container_name: biomni-dev-tier
+    hostname: biomni-dev
+    environment:
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      
+      # Configuration
+      - BIOMNI_DATA_PATH=/biomni_data
+      - BIOMNI_SKIP_DOWNLOAD=true
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-biomni-tier}
+      
+    volumes:
+      # Mount everything including source for development
+      - ${BIOMNI_LOCAL_DATA_PATH:-../../data}/data_lake:/biomni_data/data_lake:ro
+      - ${BIOMNI_LOCAL_DATA_PATH:-../../data}/benchmark:/biomni_data/benchmark:ro
+      - biomni-cache-dev:/biomni_data/cache
+      - ./data/results:/biomni_data/results
+      - ./data/logs:/biomni_data/logs
+      
+      # Development: mount source code for live editing
+      - ./biomni:/app/biomni
+      - ./biomni_local_mount.py:/app/biomni_local_mount.py
+      - ../../notebooks:/app/notebooks
+      - ./tutorials:/app/tutorials
+      
+    ports:
+      - "8888:8888"  # Jupyter Lab
+      
+    networks:
+      - biomni-tier-network
+    
+    # Development resources (between Tier 1 and 2)
+    deploy:
+      resources:
+        limits:
+          cpus: '3'
+          memory: 12G
+        reservations:
+          cpus: '2'
+          memory: 6G
+    
+    profiles:
+      - dev
+    
+    restart: unless-stopped
+
+# Networks
+networks:
+  biomni-tier-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
+
+# Named volumes for caches (data lake is bind-mounted from host)
+volumes:
+  biomni-cache-tier1:
+    driver: local
+  
+  biomni-cache-tier2:
+    driver: local
+  
+  biomni-cache-dev:
+    driver: local
