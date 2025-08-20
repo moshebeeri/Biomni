@@ -410,7 +410,7 @@ DOCKER_CMD="$DOCKER_CMD -e BIOMNI_DATA_PATH=/biomni_data"
 DOCKER_CMD="$DOCKER_CMD --env-file $ENV_FILE"
 DOCKER_CMD="$DOCKER_CMD -v $(realpath $DATA_DIR):/biomni_data"
 DOCKER_CMD="$DOCKER_CMD -v $(pwd)/../agents/biomni_wrapper.py:/app/biomni_local_mount.py:ro"
-DOCKER_CMD="$DOCKER_CMD -v $(pwd)/../../notebooks:/app/notebooks"
+DOCKER_CMD="$DOCKER_CMD -v $(pwd)/../notebooks:/app/notebooks"
 
 # Add Jupyter port if enabled
 if [ "$ENABLE_JUPYTER" = true ]; then
