@@ -151,10 +151,10 @@ export function CodeRendererComponent(props: Readonly<CodeRendererProps>) {
           <TabsContent value="preview" className="h-full mt-0 p-4">
             <div className="w-full h-full min-h-[600px] border rounded-lg overflow-hidden bg-white">
               <iframe
-                srcDoc={artifactContent.code.replace(/<script/gi, '<!-- script').replace(/<\/script>/gi, '</script -->')}
+                srcDoc={artifactContent.code}
                 title="HTML Preview"
                 className="w-full h-full"
-                sandbox="allow-same-origin"
+                sandbox="allow-scripts allow-same-origin"
                 style={{ minHeight: "600px" }}
               />
             </div>

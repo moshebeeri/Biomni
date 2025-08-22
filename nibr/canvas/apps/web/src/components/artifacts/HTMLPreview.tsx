@@ -35,7 +35,7 @@ export function HTMLPreview({ code, onClose, title = "HTML Preview" }: HTMLPrevi
           </style>
         </head>
         <body>
-          ${code.replace(/<script/gi, '<!-- script').replace(/<\/script>/gi, '</script -->')}
+          ${code}
         </body>
       </html>
     `;
@@ -64,7 +64,7 @@ export function HTMLPreview({ code, onClose, title = "HTML Preview" }: HTMLPrevi
               srcDoc={srcDoc}
               title={title}
               className="w-full h-full"
-              sandbox="allow-same-origin"
+              sandbox="allow-scripts allow-same-origin"
               style={{ minHeight: "400px" }}
             />
           </div>
