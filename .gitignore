@@ -227,3 +227,19 @@ data/ddinter_raw/
 # Sphinx build
 /docs/build/
 /docs/source/api/
+
+# NIBR Canvas specific
+nibr/IMPLEMENTATION_PLAN.md
+nibr/next-plan.md
+nibr/test_persistent_integration.py
+nibr/src/
+nibr/canvas/**/.next/
+nibr/canvas/**/node_modules/
+nibr/canvas/**/.env.local
+nibr/canvas/**/.env.production
+nibr/canvas/apps/web/.next/
+nibr/canvas/apps/web/out/
+nibr/canvas/apps/web/*.log
+nibr/canvas/apps/web/npm-debug.log*
+nibr/canvas/apps/web/yarn-debug.log*
+nibr/canvas/apps/web/yarn-error.log*

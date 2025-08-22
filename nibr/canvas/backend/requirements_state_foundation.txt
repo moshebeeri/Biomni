@@ -1,0 +1,35 @@
+# Pre-Phase 0: State Management Foundation Dependencies
+# Additional requirements for the persistent state layer
+
+# Core serialization for complex function persistence
+dill>=0.3.7
+
+# Enhanced pickle support
+cloudpickle>=2.2.1
+
+# Path manipulation
+pathlib2>=2.3.7; python_version < "3.4"
+
+# Existing biomni requirements (ensure compatibility)
+biomni>=0.1.0
+
+# Base dependencies for A1 agent
+anthropic>=0.20.0
+openai>=1.0.0
+
+# Logging and error handling
+structlog>=23.1.0
+
+# File system utilities
+watchdog>=3.0.0
+
+# JSON handling for large files
+orjson>=3.9.0
+
+# Type hints support
+typing-extensions>=4.8.0
+
+# Development dependencies (optional)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
