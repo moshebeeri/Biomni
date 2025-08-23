@@ -51,6 +51,8 @@ app.add_middleware(
 assistants_db: Dict[str, Dict[str, Any]] = {}
 threads_db: Dict[str, Dict[str, Any]] = {}
 messages_db: Dict[str, List[Dict[str, Any]]] = {}
+# Track artifacts per thread
+artifacts_db: Dict[str, Dict[str, Any]] = {}
 
 # Create default assistant
 default_assistant = {
@@ -260,16 +262,31 @@ async def delete_thread(thread_id: str):
         del threads_db[thread_id]
     if thread_id in messages_db:
         del messages_db[thread_id]
+    if thread_id in artifacts_db:
+        del artifacts_db[thread_id]
     return {"success": True}
 
 # === HELPER FUNCTIONS ===
 
-def should_generate_artifact(prompt: str) -> tuple[bool, str, str]:
+def should_generate_artifact(prompt: str, has_previous_artifact: bool = False) -> tuple[bool, str, str]:
     """
     Determine if the prompt is asking for code/HTML that should be an artifact.
     Returns (should_generate, artifact_type, language)
     """
     prompt_lower = prompt.lower()
+    
+    # Check for modification requests when there's a previous artifact
+    if has_previous_artifact:
+        modification_patterns = [
+            r'\b(change|modify|update|edit|adjust|fix|improve|alter|revise)\s+.*\b(code|script|html|it|this)\b',
+            r'\bplease\s+(change|modify|update|edit|adjust|fix|improve)\b',
+            r'\b(make|so)\s+(it|the|that)\b',
+            r'\b(increment|decrement|button|value|counter)\b.*\b(by|of|to)\b',
+        ]
+        for pattern in modification_patterns:
+            if re.search(pattern, prompt_lower):
+                # Return True with 'code' type and 'html' as default (will be overridden from context)
+                return True, 'code', 'html'
     
     # Check for code/HTML requests
     code_patterns = [
@@ -313,6 +330,25 @@ def extract_title_from_prompt(prompt: str) -> str:
     significant_words = [w for w in words if len(w) > 3 and w.lower() not in 
                          ['write', 'create', 'make', 'build', 'with', 'that', 'this', 'please']]
     return ' '.join(significant_words[:3]) if significant_words else 'Artifact'
+
+def strip_markdown_code_blocks(content: str) -> str:
+    """
+    Strip markdown code block wrappers from content.
+    Handles various formats like ```html, ```javascript, ```python, etc.
+    """
+    # Pattern to match markdown code blocks with optional language specifier
+    # Matches ```language (or just ```) at the start and ``` at the end
+    pattern = r'^```[a-zA-Z0-9]*\n?(.*?)\n?```$'
+    
+    # Try to match the pattern
+    match = re.match(pattern, content.strip(), re.DOTALL)
+    
+    if match:
+        # Return the content without the markdown wrapper
+        return match.group(1).strip()
+    
+    # If no markdown wrapper found, return original content
+    return content
 
 # === RUN ENDPOINTS ===
 
@@ -418,7 +454,15 @@ def create_run(thread_id: str, run_request: Dict[str, Any]):
             yield f"event: message\ndata: {json.dumps({'event': 'on_chain_start', 'run_id': run_id})}\n\n"
             
             # Check if this should generate an artifact
-            should_artifact, artifact_type, language = should_generate_artifact(user_input)
+            has_previous_artifact = thread_id in artifacts_db
+            should_artifact, artifact_type, language = should_generate_artifact(user_input, has_previous_artifact)
+            
+            # If modifying an existing artifact, use its language
+            if should_artifact and has_previous_artifact:
+                previous_artifact = artifacts_db[thread_id]
+                language = previous_artifact.get('language', language)
+                artifact_type = previous_artifact.get('type', artifact_type)
+                print(f"🔧 Modification detected - using previous artifact settings: type={artifact_type}, language={language}")
             
             # Try ChatGPT if available, otherwise use mock response
             if openai_client and OPENAI_API_KEY:
@@ -427,9 +471,27 @@ def create_run(thread_id: str, run_request: Dict[str, Any]):
                 print(f"📤 Sending prompt: '{user_input}'")
                 print(f"🎨 Generate artifact: {should_artifact}, type: {artifact_type}, language: {language}")
                 
+                # Build message history for context
+                chat_messages = []
+                
+                # Check if user is asking to modify existing artifact
+                is_modification = any(word in user_input.lower() for word in 
+                                    ['change', 'modify', 'update', 'edit', 'adjust', 'fix', 'improve', 'alter', 'revise',
+                                     'make it', 'make the', 'so the', 'so that', 'instead'])
+                
+                # Also check if talking about the code/artifact specifically
+                refers_to_code = any(word in user_input.lower() for word in 
+                                    ['the code', 'the script', 'the html', 'it', 'this', 'that'])
+                
                 # Adjust system prompt based on whether we need an artifact
                 if should_artifact:
-                    if artifact_type == 'code' and language == 'html':
+                    if has_previous_artifact and (is_modification or refers_to_code):
+                        # For modifications, be clear about outputting only code
+                        if language == 'html':
+                            system_prompt = "You are a helpful AI assistant. When modifying HTML code, output ONLY the complete, valid HTML code with proper structure. Do not include any explanations or markdown formatting."
+                        else:
+                            system_prompt = f"You are a helpful AI assistant. When modifying {language} code, output ONLY the complete {language} code. Do not include any explanations or markdown formatting."
+                    elif artifact_type == 'code' and language == 'html':
                         system_prompt = "You are a helpful AI assistant. Generate complete, valid HTML code with proper structure. Include DOCTYPE, html, head, and body tags."
                     elif artifact_type == 'code':
                         system_prompt = f"You are a helpful AI assistant. Generate clean, well-commented {language} code."
@@ -438,13 +500,34 @@ def create_run(thread_id: str, run_request: Dict[str, Any]):
                 else:
                     system_prompt = "You are a helpful AI assistant for biomedical research at NIBR. Be concise but informative."
                 
+                chat_messages.append({"role": "system", "content": system_prompt})
+                
+                # Add previous context if it's a modification request or refers to existing code
+                if (is_modification or refers_to_code) and thread_id in artifacts_db:
+                    last_artifact = artifacts_db[thread_id]
+                    print(f"🔄 Detected modification request. Including previous artifact as context")
+                    print(f"📋 Previous artifact type: {last_artifact['type']}, language: {last_artifact['language']}")
+                    # Add the previous artifact as context
+                    context_msg = f"Here is the current {last_artifact['language']} code that needs to be modified:\n\n```{last_artifact['language']}\n{last_artifact['content']}\n```"
+                    chat_messages.append({"role": "assistant", "content": context_msg})
+                    
+                    # Include last few messages for context (limit to avoid token overflow)
+                    if thread_id in messages_db:
+                        recent_messages = messages_db[thread_id][-4:]  # Last 4 messages
+                        for msg in recent_messages:
+                            if msg["type"] == "human":
+                                chat_messages.append({"role": "user", "content": msg["content"]})
+                            elif msg["type"] == "ai" and "artifact" not in msg:
+                                # Only include non-artifact AI responses
+                                chat_messages.append({"role": "assistant", "content": msg["content"]})
+                
+                # Add current user message
+                chat_messages.append({"role": "user", "content": user_input})
+                
                 # Call ChatGPT
                 completion = openai_client.chat.completions.create(
                     model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_input}
-                    ],
+                    messages=chat_messages,
                     stream=True
                 )
                 
@@ -463,8 +546,11 @@ def create_run(thread_id: str, run_request: Dict[str, Any]):
                     
                     # Send as artifact tool call
                     artifact_title = extract_title_from_prompt(user_input)
+                    # Strip markdown code blocks from the response
+                    cleaned_content = strip_markdown_code_blocks(full_response)
                     print(f"🎨 Preparing artifact: type={artifact_type}, language={language}, title={artifact_title}")
-                    print(f"📝 Artifact content length: {len(full_response)} chars")
+                    print(f"📝 Original content length: {len(full_response)} chars")
+                    print(f"📝 Cleaned content length: {len(cleaned_content)} chars")
                     
                     tool_call_event = {
                         'event': 'on_chat_model_stream',
@@ -479,7 +565,7 @@ def create_run(thread_id: str, run_request: Dict[str, Any]):
                                     'args': json.dumps({
                                         'type': artifact_type,
                                         'language': language,
-                                        'artifact': full_response,
+                                        'artifact': cleaned_content,
                                         'title': artifact_title
                                     }),
                                     'id': str(uuid.uuid4()),
@@ -530,6 +616,16 @@ def create_run(thread_id: str, run_request: Dict[str, Any]):
                     "content": full_response,
                     "created_at": datetime.datetime.utcnow().isoformat(),
                 }
+                # Store artifact info if this was an artifact
+                if should_artifact:
+                    assistant_message["artifact"] = {
+                        "type": artifact_type,
+                        "language": language,
+                        "content": cleaned_content,
+                        "title": artifact_title
+                    }
+                    # Store in artifacts_db for easy access
+                    artifacts_db[thread_id] = assistant_message["artifact"]
                 messages_db[thread_id].append(assistant_message)
                         
             else:
