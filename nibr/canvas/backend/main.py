@@ -1,7 +1,16 @@
 """
-NIBR Biomni Canvas Backend - Phase 1.5
+NIBR Biomni Canvas Backend - Consolidated Version
 FastAPI backend for Canvas integration with ChatGPT
 No LangGraph dependencies - pure FastAPI + OpenAI
+
+This is the consolidated main backend file combining all features:
+- Canvas API endpoints (assistants, threads, runs)
+- ChatGPT integration with streaming
+- Artifact management
+- Python code execution
+- Ready for Biomni agent integration
+
+Previous versions archived in archive/ directory
 """
 
 from fastapi import FastAPI, HTTPException, status
