@@ -10,6 +10,20 @@ This guide documents the deployment of Biomni for NIBR (Novartis Institutes for 
 **Version**: 2.1.0-NIBR  
 **Script Version**: nibr/scripts/setup.sh v2.1.0
 
+## Documentation
+
+### Container Documentation
+- [Container Architecture](docs/container-architecture.md) - Service components and architecture overview
+- [Build Process](docs/container-build.md) - Docker build process and optimization
+- [Network Setup](docs/network-setup.md) - Network configuration and troubleshooting
+- [Deployment Guide](docs/deployment-guide.md) - Step-by-step deployment instructions
+- [Jupyter Integration](docs/jupyter-integration.md) - Jupyter Lab integration in biomni container
+- [Legacy Docker Deployment](docs/docker-deployment-legacy.md) - Previous deployment approach
+
+### Project Documentation
+- [Implementation Plan](IMPLEMENTATION_PLAN.md) - Technical implementation roadmap
+- [Next Plan](next-plan.md) - Current priorities and milestones (Updated Aug 25, 2025)
+
 ## Architecture
 
 ```
@@ -40,22 +54,22 @@ Docker Container (biomni-nibr)
 
 ```bash
 # Option 1: From project root
-cd nibr && ./setup.sh
+cd nibr && ./scripts/setup.sh
 
 # Option 2: From scripts directory  
 cd nibr/scripts && ./setup.sh
 
 # With Jupyter enabled
-./setup.sh --jupyter
+./scripts/setup.sh --jupyter
 
 # Full build with all packages (slow)
-./setup.sh --build full --r-packages full
+./scripts/setup.sh --build full --r-packages full
 
 # Skip R packages completely for fastest build
-./setup.sh --r-packages none
+./scripts/setup.sh --r-packages none
 
 # Custom resources
-./setup.sh --memory 32g --cpus 8
+./scripts/setup.sh --memory 32g --cpus 8
 ```
 
 The unified script supports:
@@ -422,11 +436,16 @@ The `biomni-nibr` container is optimized for NIBR molecular biology workloads wi
 ```bash
 # Most common commands (from project root)
 cd nibr
-./setup.sh                    # Default setup
-./setup.sh -j                 # With Jupyter
-./setup.sh -r none -j         # Fastest (no R) + Jupyter
-./setup.sh --skip-data --skip-build  # Restart only
-scripts/jupyter-launch.sh     # Launch Jupyter UI
+
+# Setup and build
+./scripts/setup.sh                    # Default setup
+./scripts/setup.sh -j                 # With Jupyter
+./scripts/setup.sh -r none -j         # Fastest (no R) + Jupyter
+
+# Container management
+./scripts/rebuild-containers.sh --all # Rebuild all containers
+./scripts/container-status.sh         # Check container status
+./scripts/start-docker-stack.sh       # Start full stack
 
 # Container management
 docker exec -it biomni-nibr /bin/bash  # Shell access

@@ -1,0 +1,264 @@
+version: '3.8'
+
+# Docker Compose for Canvas + Biomni Integration
+# This file adds Canvas UI services to the Biomni stack
+
+services:
+  # Canvas Frontend (Next.js)
+  canvas-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: nibr/canvas-frontend:latest
+    container_name: canvas-frontend
+    hostname: canvas-frontend
+    environment:
+      # API endpoints
+      - NEXT_PUBLIC_API_URL=http://canvas-backend:54367
+      - NEXT_PUBLIC_BIOMNI_URL=http://biomni-tier1:8000
+      
+      # Authentication
+      - NEXT_PUBLIC_AUTH_ENABLED=${AUTH_ENABLED:-false}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-development-secret-change-in-production}
+      
+      # Development/Production mode
+      - NODE_ENV=${NODE_ENV:-production}
+      
+    volumes:
+      # Mount for hot reload in development
+      - ./apps/web:/app/apps/web:ro
+      - ./packages:/app/packages:ro
+      
+      # Data directories
+      - canvas-uploads:/app/uploads
+      - canvas-artifacts:/app/artifacts
+      
+    ports:
+      - "3000:3000"
+      
+    networks:
+      - canvas-network
+      - biomni-tier-network
+      
+    depends_on:
+      canvas-backend:
+        condition: service_healthy
+        
+    restart: unless-stopped
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # Canvas Backend (FastAPI)
+  canvas-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: nibr/canvas-backend:latest
+    container_name: canvas-backend
+    hostname: canvas-backend
+    environment:
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      
+      # Biomni Integration
+      - BIOMNI_AGENT_URL=http://biomni-tier1:8000
+      - BIOMNI_DATA_PATH=/biomni_data
+      
+      # Database
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./canvas.db}
+      
+      # Development/Production
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      
+    volumes:
+      # Backend code
+      - ./backend:/app/backend:ro
+      - ./scripts:/app/scripts:ro
+      
+      # Persistent data
+      - canvas-db:/app/data
+      - canvas-logs:/app/logs
+      - canvas-uploads:/app/uploads
+      
+      # Shared with Biomni for data access
+      - ${BIOMNI_LOCAL_DATA_PATH:-../data}/data_lake:/biomni_data/data_lake:ro
+      
+    ports:
+      - "54367:54367"
+      
+    networks:
+      - canvas-network
+      - biomni-tier-network
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:54367/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      
+    restart: unless-stopped
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # PostgreSQL Database (Optional - for production)
+  canvas-db:
+    image: postgres:15-alpine
+    container_name: canvas-db
+    hostname: canvas-db
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-canvas}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-canvas-password}
+      - POSTGRES_DB=${POSTGRES_DB:-canvas}
+      - POSTGRES_HOST_AUTH_METHOD=md5
+      
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+      
+    ports:
+      - "5432:5432"
+      
+    networks:
+      - canvas-network
+      
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U canvas"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      
+    restart: unless-stopped
+    
+    profiles:
+      - production
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis Cache (Optional - for production)
+  canvas-redis:
+    image: redis:7-alpine
+    container_name: canvas-redis
+    hostname: canvas-redis
+    command: redis-server --appendonly yes
+    
+    volumes:
+      - redis-data:/data
+      
+    ports:
+      - "6379:6379"
+      
+    networks:
+      - canvas-network
+      
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      
+    restart: unless-stopped
+    
+    profiles:
+      - production
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Nginx Reverse Proxy (Optional - for production)
+  canvas-nginx:
+    image: nginx:alpine
+    container_name: canvas-nginx
+    hostname: canvas-nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx-cache:/var/cache/nginx
+      
+    ports:
+      - "80:80"
+      - "443:443"
+      
+    networks:
+      - canvas-network
+      
+    depends_on:
+      - canvas-frontend
+      - canvas-backend
+      
+    restart: unless-stopped
+    
+    profiles:
+      - production
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+# Networks
+networks:
+  canvas-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+        
+  # Reference to Biomni network from main docker-compose
+  biomni-tier-network:
+    external: true
+    name: docker_biomni-tier-network
+
+# Volumes
+volumes:
+  # Canvas specific volumes
+  canvas-db:
+    driver: local
+  canvas-logs:
+    driver: local
+  canvas-uploads:
+    driver: local
+  canvas-artifacts:
+    driver: local
+    
+  # Production volumes
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  nginx-cache:
+    driver: local

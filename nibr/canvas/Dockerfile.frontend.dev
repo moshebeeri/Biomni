@@ -1,0 +1,54 @@
+# Canvas Frontend Development Dockerfile
+# Simplified version for development
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies
+RUN apk add --no-cache libc6-compat git
+
+# Copy all package files first (including shared package)
+COPY package*.json ./
+COPY yarn.lock* ./
+COPY package-lock.json* ./
+COPY apps/web/package*.json ./apps/web/
+COPY packages/shared/package*.json ./packages/shared/
+COPY packages/evals/package*.json ./packages/evals/
+
+# Copy turbo config if exists
+COPY turbo.json* ./
+
+# Install dependencies at root level
+# Handle mixed lock files by preferring npm
+RUN if [ -f package-lock.json ]; then \
+      npm ci; \
+    elif [ -f yarn.lock ]; then \
+      yarn install; \
+    else \
+      npm install; \
+    fi
+
+# Copy all application code
+COPY . .
+
+# Build shared package first
+WORKDIR /app/packages/shared
+RUN npm run build || true
+
+# Return to root
+WORKDIR /app
+
+# Set environment variables
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+# Increase Node.js memory limit for large Next.js app
+ENV NODE_OPTIONS="--max-old-space-size=3072"
+
+# Expose port
+EXPOSE 3000
+
+# Start development server
+WORKDIR /app/apps/web
+CMD ["npm", "run", "dev"]

@@ -53,7 +53,7 @@ RUN pip install --no-cache-dir \
     scanpy \
     rdkit
 
-# Stage 3: Production image (NO R packages)
+# Stage 3: Production image with Jupyter for researchers
 FROM python-env AS production
 
 WORKDIR /app
@@ -62,30 +62,88 @@ WORKDIR /app
 COPY biomni/ /app/biomni/
 COPY pyproject.toml /app/
 COPY README.md /app/
-COPY biomni_local_mount.py /app/
+# Copy wrapper script - use biomni_wrapper.py from nibr/agents
+COPY nibr/agents/biomni_wrapper.py /app/biomni_local_mount.py
 
 # Install Biomni package
 SHELL ["conda", "run", "-n", "biomni_e1", "/bin/bash", "-c"]
 RUN pip install -e .
 
+# Install Jupyter and research tools for Python/R users
+RUN pip install --no-cache-dir \
+    jupyter \
+    jupyterlab \
+    ipywidgets \
+    notebook \
+    ipython \
+    matplotlib \
+    seaborn \
+    plotly \
+    nbformat
+
 # Create data directories
 RUN mkdir -p /biomni_data/data_lake \
     /biomni_data/cache \
     /biomni_data/results \
-    /biomni_data/logs
+    /biomni_data/logs \
+    /biomni_data/notebooks
 
 # Set environment variables
 ENV BIOMNI_DATA_PATH=/biomni_data
 ENV CONDA_DEFAULT_ENV=biomni_e1
 ENV PATH="/opt/conda/envs/biomni_e1/bin:$PATH"
+ENV JUPYTER_TOKEN=biomni
+ENV ENABLE_JUPYTER=true
 
-# Create entrypoint script with proper formatting
+# Expose both Jupyter and potential API ports
+EXPOSE 8888 8000
+
+# Create flexible entrypoint script that can run Jupyter alongside Biomni
 RUN printf '#!/bin/bash\n\
 source /opt/conda/etc/profile.d/conda.sh\n\
 conda activate biomni_e1\n\
-exec "$@"\n' > /entrypoint.sh && \
-    chmod +x /entrypoint.sh && \
-    cat /entrypoint.sh  # Debug: show content
+\n\
+# Start Jupyter if enabled\n\
+if [ "$ENABLE_JUPYTER" = "true" ]; then\n\
+    echo "Starting Jupyter Lab on port 8888 with token: $JUPYTER_TOKEN"\n\
+    jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root \\\n\
+        --NotebookApp.token="$JUPYTER_TOKEN" \\\n\
+        --notebook-dir=/biomni_data/notebooks &\n\
+    echo "Jupyter Lab started in background"\n\
+fi\n\
+\n\
+# Keep container running and show status\n\
+echo "Biomni container ready"\n\
+if [ "$ENABLE_JUPYTER" = "true" ]; then\n\
+    echo "Access Jupyter at: http://localhost:8888?token=$JUPYTER_TOKEN"\n\
+fi\n\
+\n\
+# Keep container alive\n\
+tail -f /dev/null\n' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
-CMD ["python", "-c", "from biomni_local_mount import A1LocalMount; print('Biomni container ready')"]
+CMD []
+
+# Stage 4: Development environment with Jupyter
+FROM production AS development
+
+# Install Jupyter and development tools
+RUN pip install --no-cache-dir \
+    jupyter \
+    jupyterlab \
+    ipywidgets \
+    notebook \
+    ipython
+
+# Expose Jupyter port
+EXPOSE 8888
+
+# Create jupyter config
+RUN jupyter notebook --generate-config && \
+    echo "c.NotebookApp.ip = '0.0.0.0'" >> /root/.jupyter/jupyter_notebook_config.py && \
+    echo "c.NotebookApp.allow_root = True" >> /root/.jupyter/jupyter_notebook_config.py && \
+    echo "c.NotebookApp.open_browser = False" >> /root/.jupyter/jupyter_notebook_config.py
+
+# Override CMD for development
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]

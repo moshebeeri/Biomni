@@ -863,6 +863,17 @@ finally:
             error=f"Execution failed: {str(e)}"
         )
 
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker and monitoring"""
+    return {
+        "status": "healthy",
+        "service": "canvas-backend",
+        "version": "1.5.0",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting NIBR Biomni Canvas Backend")
